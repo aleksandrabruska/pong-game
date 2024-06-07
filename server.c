@@ -8,28 +8,127 @@
 #include<errno.h>
 #include<unistd.h>
 #include <pthread.h>
+#include <math.h>
 
 #define MAX 80 
 #define PORT 8080 
 #define SA struct sockaddr 
- 
-int ball_x = 0;
-int ball_y = 0;
+#define WIDTH  60
+#define HEIGHT 15
+#define PALETTE_LENGTH
 
+
+
+enum {LEFT, RIGHT};
+double ball_x = -1;
+double ball_y = 0;
+double move_vect[] = {1.0, -0.75};
+double prev_start_x = 1;
+
+double player1_pos[] = {0,0};
+double player2_pos[] = {WIDTH,0};
+int points[] = {0,0};
 
 // Function designed for chat between client and server. 
-
+void start_pos(){
+	move_vect[0] = -prev_start_x;
+	prev_start_x = -prev_start_x;
+	move_vect[1] = -0.75;
+	ball_x = WIDTH/2;
+	ball_y = HEIGHT/2; 
+}
 void my_sleep(){
 	time_t time = clock();
-	while(clock() - time < 1000000){
+	while(clock() - time < 250000){
 		//printf("%d\n", clock() - time);
 	}
 }
-void move_ball(){
-	ball_x += 1;
-	ball_y += 1;
+
+int check_for_hit(){
+	if(ball_x <= player1_pos[0] && ball_y >= (int)(player1_pos[1])
+			&& ball_y <= (int)(player1_pos[1] +3)){
+		if(move_vect[0] < 0){
+			move_vect[0] = - move_vect[0];
+			points[0]++;
+			return 1;
+		}
+		
+	}
+	else if(ball_x >= player2_pos[0]-2 && ball_y >= (int)(player2_pos[1])
+			&&ball_y <= (int)(player2_pos[1] +3)){
+		if(move_vect[0] > 0){
+			move_vect[0] = - move_vect[0];
+			points[1]++;
+			return 1;
+		}
+		
+	}
+	return 0;
 }
-void* func(void* connfd_) 
+
+void move_ball(){
+	if(check_for_hit() == 0){
+
+		if(ball_y <=0 && move_vect[1] <0){
+			move_vect[1] = -move_vect[1];
+		}
+		else if(ball_y >= HEIGHT-1 && move_vect[1] > 0){
+			move_vect[1] = - move_vect[1];
+		}
+		//f(ball_x <= 0 && move_vect[0] < 0  || ball_x >= WIDTH && move_vect[1] > 0){
+		if(ball_x <= 0 && move_vect[0] <= 0 || ball_x >= WIDTH-1 && move_vect[0] >= 0){
+			//move_vect[0] = - move_vect[0];
+
+			start_pos();
+		}
+	}
+	ball_x += move_vect[0];	
+	ball_y += move_vect[1];
+	
+	//ball_x += 1;
+	
+}
+
+void read_paddle(int connfd_){
+	char buff[MAX]; 
+
+	read(connfd_, buff, sizeof(buff)); 
+	
+	if(buff[0] == 1){
+		int z = buff[1];
+		player1_pos[1] = z;
+		printf("Player 1 pos %lf %lf\n", player1_pos[0], player1_pos[1]);
+	}
+	else{
+		int z = buff[1];
+		player2_pos[1] = z;
+		printf("Player 2 pos %lf %lf\n", player2_pos[0], player2_pos[1]);
+	}
+	bzero(buff, MAX); 
+}
+
+
+void send_info(int connfd_){
+	int n = 0;
+	char buff[MAX]; 
+	int ball_x_i = ball_x;
+	int ball_y_i = ball_y;
+	buff[n++] = ball_x_i;
+	buff[n++] = ball_y_i;;
+	buff[n++] = player1_pos[1];
+	buff[n++] = player2_pos[1];
+	buff[n++] = points[0];
+	buff[n++] = points[1];
+	printf("Sending %d %d %d %d\n", buff[0], buff[1], buff[3], buff[4]);
+ 
+	
+	write(connfd_, buff, sizeof(buff)); 
+	bzero(buff, MAX); 
+
+}
+
+
+void* client_thread_func(void* connfd_) 
 { 
 	//my_sleep();
 	int prev_x = 0;
@@ -50,27 +149,25 @@ void* func(void* connfd_)
 			// print buffer which contains the client contents 
 			//printf("From client: %s\t To client : ", buff); 
 			//bzero(buff, MAX); 
-			n = 0; 
+			//n = 0; 
 			// copy server message in the buffer 
 			//while ((buff[n++] = getchar()) != '\n') 
 			//	;
 			//move_ball();
-			buff[n++] = ball_x / 10;
-			buff[n++] = ball_x % 10;
-			buff[n++] = ' ';
-			buff[n++] = ball_y/ 10;
-			buff[n++] = ball_y % 10;
-			buff[n++] = '\0';
-			printf("Sending %d %d %d %d\n", buff[0], buff[1], buff[3], buff[4]);
+			
 			// and send that buffer to client 
-			write(connfd, buff, sizeof(buff)); 
-	
+			//write(connfd, buff, sizeof(buff)); 
+
 			// if msg contains "Exit" then server exit and chat ended. 
 			if (strncmp("exit", buff, 4) == 0) { 
 				printf("Server Exit...\n"); 
 				break; 
 			} 
+			send_info(connfd);
+			read_paddle(connfd);
+			
 		}
+		
 		//wait(100);
 	} 
 	
@@ -157,8 +254,8 @@ int main()
 
 	void* connfd_p = &connfd;
 	void* connfd_p2 = &connfd2;
-	pthread_create (&w , NULL , func , connfd_p ) ;
-	pthread_create (&w2 , NULL , func , connfd_p2 ) ;
+	pthread_create (&w , NULL , client_thread_func , connfd_p ) ;
+	pthread_create (&w2 , NULL , client_thread_func , connfd_p2 ) ;
 	pthread_create (&server_th , NULL , server_thread, NULL) ;
 
 	pthread_join (w , NULL ) ;
