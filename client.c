@@ -1,11 +1,24 @@
-#include <arpa/inet.h> // inet_addr() 
+/*****************************
+*
+* PONG GAME
+* Distributed Processing project
+* Part 3: Implementation
+*
+* Aleksandra Bruska, 185454
+* Jan Walczak, 193440
+* Igor Jozefowicz, 193257
+* Gdansk University of Technology
+*
+******************************/
+
+#include <arpa/inet.h> 
 #include <netdb.h> 
 #include <stdio.h> 
 #include <stdlib.h> 
 #include <string.h> 
-#include <strings.h> // bzero() 
+#include <strings.h> 
 #include <sys/socket.h> 
-#include <unistd.h> // read(), write(), close() 
+#include <unistd.h> 
 #include <pthread.h>
 
 #include <unistd.h>
@@ -22,7 +35,8 @@
 int clinet_id;
 int my_bat_position = HEIGTH/2;
 int opponent_bat_position = HEIGTH/2;
-
+int set_power_mode = 0;
+int time_to_next_power_mode = 100;
 
 
 
@@ -37,7 +51,7 @@ void set_terminal_mode() {
     tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 }
 
-// Funkcja do przywrócenia domyślnego trybu terminala
+
 void reset_terminal_mode() {
     struct termios newt;
     tcgetattr(STDIN_FILENO, &newt);
@@ -47,8 +61,17 @@ void reset_terminal_mode() {
 
 
 char wall = '.';
+int score_one, score_two, end, ball_x, ball_y;
 
+char* title1 = "  _____   ____  _   _  _____    _____          __  __ ______\0";
+char* title2 = " |  __ \\ / __ \\| \\ | |/ ____|  / ____|   /\\   |  \\/  |  ____|\0";
+char* title3 = " | |__) | |  | |  \\| | |  __  | |  __   /  \\  | \\  / | |__   \0";
+char* title4 = " |  ___/| |  | | . ` | | |_ | | | |_ | / /\\ \\ | |\\/| |  __|  \0";
+char* title5 = " | |    | |__| | |\\  | |__| | | |__| |/ ____ \\| |  | | |____\0";
+char* title6 = " |_|     \\____/|_| \\_|\\_____|  \\_____/_/    \\_\\_|  |_|______|\0";
 void print_board() {
+	char* title[7] = {title1, title2, title3, title4, title5, title6};
+
 	system("clear");
 
     for (int i = 0; i <= HEIGTH + 1; i++) {
@@ -66,17 +89,46 @@ void print_board() {
 		printf("%c\n", wall);
         }
     }
-	printf("%d\n", clinet_id);
-		
+
+	printf("You are the client number: %d\n", clinet_id);
+	
+	printf("Your points: ");
+	if(clinet_id == 1) {
+		printf("%d\nYour opponent's points: %d\n", score_one, score_two);
+	} else {
+		printf("%d\nYour opponent's points: %d\n", score_two, score_one);
+	}
+
+
+	
+
+	for (int i = 0; i < 6; i++)
+        printf("%s\n", title[i]);
+
+	char hashappened = 0;
+	if(set_power_mode == 1){
+		hashappened = 1;
+	}
+
+
+	if(end) {
+		gotoxy(WIDTH/2 + 2 - 22, HEIGTH/2);
+		printf("END OF GAME, PLAYER -- %d -- WON THE GAME!!", end);
+	}
+	
+	
 
 }
 char znak = '0';
 
 char xyz[MAX];
+
 void send_bat(int sockfd) {
 	bzero(xyz, sizeof(xyz)); 
 	xyz[0] = clinet_id;
 	xyz[1] = my_bat_position;
+	xyz[2] = set_power_mode;
+	set_power_mode = 0;
 	write(sockfd, xyz, sizeof(xyz));
 }
 
@@ -92,6 +144,11 @@ void* getCharacter(void* a) {
 			if(my_bat_position < HEIGTH - BAT_H)
 				my_bat_position++;
 		}
+		else if (znak == 'p'){
+			if(time_to_next_power_mode == 0){
+				set_power_mode = 1;
+			}
+		}
 		znak = '\xff';
 	}
 }
@@ -101,15 +158,9 @@ void *func(void* sockfd_)
 	int* tmp = (int*)sockfd_;
 	int sockfd = *tmp;
 	char buff[MAX]; 
-	int ball_x, ball_y, client_x, opponent_x;
-	int server_player_one, server_player_two, score_one, score_two, print_oponent;
-	char* title1 = "  _____   ____  _   _  _____    _____          __  __ ______\0";
-	char* title2 = " |  __ \\ / __ \\| \\ | |/ ____|  / ____|   /\\   |  \\/  |  ____|\0";
-	char* title3 = " | |__) | |  | |  \\| | |  __  | |  __   /  \\  | \\  / | |__   \0";
-	char* title4 = " |  ___/| |  | | . ` | | |_ | | | |_ | / /\\ \\ | |\\/| |  __|  \0";
-	char* title5 = " | |    | |__| | |\\  | |__| | | |__| |/ ____ \\| |  | | |____\0";
-	char* title6 = " |_|     \\____/|_| \\_|\\_____|  \\_____/_/    \\_\\_|  |_|______|\0";
-	char* title[7] = {title1, title2, title3, title4, title5, title6};
+	int client_x, opponent_x;
+	int server_player_one, server_player_two, print_oponent;
+	
 
 	if (clinet_id == 1) {
 		client_x = 2;
@@ -120,6 +171,10 @@ void *func(void* sockfd_)
 	}
 
 	for (;;) { 
+		if(time_to_next_power_mode > 0){
+			time_to_next_power_mode -= 1;
+		}
+
 		bzero(buff, sizeof(buff)); 
 		read(sockfd, buff, sizeof(buff)); 
 
@@ -129,6 +184,7 @@ void *func(void* sockfd_)
 		server_player_two = buff[3];
 		score_one = buff[4];
 		score_two = buff[5];
+		end = buff[6];
 		if (clinet_id == 1) {
 			print_oponent = server_player_two;
 		}  else {
@@ -152,10 +208,7 @@ void *func(void* sockfd_)
 		
 		printf("\e[?25l");
 
-		gotoxy(0, HEIGTH + 5);
-		for (int i = 0; i < 6; i++) {
-        	printf("%s\n", title[i]);
-    	} 
+		
 
 
 		fflush(stdout);
@@ -173,7 +226,6 @@ int main(int argc, char *argv[])
 	int sockfd, connfd; 
 	struct sockaddr_in servaddr, cli; 
  
-	// socket create and verification 
 	sockfd = socket(AF_INET, SOCK_STREAM, 0); 
 	if (sockfd == -1) { 
 		printf("socket creation failed...\n"); 
@@ -182,13 +234,11 @@ int main(int argc, char *argv[])
 	else 
 		printf("Socket successfully created..\n"); 
 	bzero(&servaddr, sizeof(servaddr)); 
- 
-	// assign IP, PORT 
+
 	servaddr.sin_family = AF_INET; 
 	servaddr.sin_addr.s_addr = inet_addr("192.168.56.2"); 
 	servaddr.sin_port = htons(PORT); 
  
-	// connect the client socket to server socket 
 	if (connect(sockfd, (SA*)&servaddr, sizeof(servaddr)) 
 		!= 0) { 
 		printf("connection with the server failed...\n"); 
@@ -197,7 +247,6 @@ int main(int argc, char *argv[])
 	else 
 		printf("connected to the server..\n"); 
  
-	// function for chat 
 
 	void* ptr_sockfd = &sockfd;
 	pthread_t w, a;
@@ -207,10 +256,6 @@ int main(int argc, char *argv[])
 	pthread_join(a, NULL);
 
 
-
-
- 
-	// close the socket 
 	close(sockfd);
 	
 	

@@ -1,3 +1,17 @@
+/*****************************
+*
+* PONG GAME
+* Distributed Processing project
+* Part 3: Implementation
+*
+* Aleksandra Bruska, 185454
+* Jan Walczak, 193440
+* Igor Jozefowicz, 193257
+* Gdansk University of Technology
+*
+******************************/
+
+
 #include <stdio.h> 
 #include <netdb.h> 
 #include <netinet/in.h> 
@@ -9,6 +23,7 @@
 #include<unistd.h>
 #include <pthread.h>
 #include <math.h>
+#include <semaphore.h>
 
 #define MAX 80 
 #define PORT 8080 
@@ -18,6 +33,7 @@
 #define PALETTE_LENGTH
 
 
+sem_t sem;
 
 enum {LEFT, RIGHT};
 double ball_x = -1;
@@ -28,8 +44,10 @@ double prev_start_x = 1;
 double player1_pos[] = {0,0};
 double player2_pos[] = {WIDTH,0};
 int points[] = {0,0};
+int points_needed = 10;
+int power_mode = 0;
+int power_mode_time = 40;
 
-// Function designed for chat between client and server. 
 void start_pos(){
 	move_vect[0] = -prev_start_x;
 	prev_start_x = -prev_start_x;
@@ -49,7 +67,7 @@ int check_for_hit(){
 			&& ball_y <= (int)(player1_pos[1] +3)){
 		if(move_vect[0] < 0){
 			move_vect[0] = - move_vect[0];
-			points[0]++;
+			//points[0]++;
 			return 1;
 		}
 		
@@ -58,7 +76,7 @@ int check_for_hit(){
 			&&ball_y <= (int)(player2_pos[1] +3)){
 		if(move_vect[0] > 0){
 			move_vect[0] = - move_vect[0];
-			points[1]++;
+			//points[1]++;
 			return 1;
 		}
 		
@@ -66,7 +84,7 @@ int check_for_hit(){
 	return 0;
 }
 
-void move_ball(){
+char move_ball(){
 	if(check_for_hit() == 0){
 
 		if(ball_y <=0 && move_vect[1] <0){
@@ -79,12 +97,27 @@ void move_ball(){
 		if(ball_x <= 0 && move_vect[0] <= 0 || ball_x >= WIDTH-1 && move_vect[0] >= 0){
 			//move_vect[0] = - move_vect[0];
 
+			if(move_vect[0] > 0){
+				points[0]++;
+			}
+			if(move_vect[0] < 0){
+				points[1]++;
+			}
+			
 			start_pos();
+			if(points[0] >= points_needed || points[1] >= points_needed)
+				return 1;
 		}
 	}
-	ball_x += move_vect[0];	
-	ball_y += move_vect[1];
-	
+	if(power_mode){
+		ball_x += 2 * move_vect[0];	
+		ball_y += 2 * move_vect[1];
+	}
+	else{
+		ball_x += move_vect[0];	
+		ball_y += move_vect[1];
+	}
+	return 0;
 	//ball_x += 1;
 	
 }
@@ -104,12 +137,23 @@ void read_paddle(int connfd_){
 		player2_pos[1] = z;
 		printf("Player 2 pos %lf %lf\n", player2_pos[0], player2_pos[1]);
 	}
+	if(buff[2] == 1){
+		printf("Setting powermode on");
+		sem_wait(&sem);
+		if(power_mode == 0){
+			power_mode = 1;
+			power_mode_time = 40;
+		}
+		sem_post(&sem);
+	}
 	bzero(buff, MAX); 
 }
+int end_of_game;
 
 
 void send_info(int connfd_){
 	int n = 0;
+	
 	char buff[MAX]; 
 	int ball_x_i = ball_x;
 	int ball_y_i = ball_y;
@@ -119,7 +163,12 @@ void send_info(int connfd_){
 	buff[n++] = player2_pos[1];
 	buff[n++] = points[0];
 	buff[n++] = points[1];
-	printf("Sending %d %d %d %d\n", buff[0], buff[1], buff[3], buff[4]);
+	buff[n++] = end_of_game;
+	
+		
+	
+	printf("Power mode %d", power_mode_time);
+	printf("SCORE p_one=%d  p_two=%d,	end = %d\n", buff[4], buff[5], buff[6]);
  
 	
 	write(connfd_, buff, sizeof(buff)); 
@@ -137,28 +186,14 @@ void* client_thread_func(void* connfd_)
 	printf("in func");
 	char buff[MAX]; 
 	int n; 
-	// infinite loop for chat 
+
 	for (;;) { 
 		if(prev_x != ball_x){
 		//sleep(1);
 			prev_x= ball_x;
 			bzero(buff, MAX); 
 	
-			// read the message from client and copy it in buffer 
-			//read(connfd, buff, sizeof(buff)); 
-			// print buffer which contains the client contents 
-			//printf("From client: %s\t To client : ", buff); 
-			//bzero(buff, MAX); 
-			//n = 0; 
-			// copy server message in the buffer 
-			//while ((buff[n++] = getchar()) != '\n') 
-			//	;
-			//move_ball();
 			
-			// and send that buffer to client 
-			//write(connfd, buff, sizeof(buff)); 
-
-			// if msg contains "Exit" then server exit and chat ended. 
 			if (strncmp("exit", buff, 4) == 0) { 
 				printf("Server Exit...\n"); 
 				break; 
@@ -172,23 +207,40 @@ void* client_thread_func(void* connfd_)
 	} 
 	
 } 
- 
 
 void* server_thread(void* arg){
 	for (;;) { 
+		if(power_mode == 1 && power_mode_time > 0){
+			power_mode_time -= 1;
+		}
+		else if(power_mode_time == 0 && power_mode != 0){
+			power_mode = 0;
+			power_mode_time = 40;
+		}
+
+
 		my_sleep();
-		move_ball();
+		if(move_ball() == 1) {
+			if(points[0] == points_needed)
+				end_of_game = 1;
+			else if(points[1] == points_needed)
+				end_of_game = 2;
+			break;		
+		}
+		
+	
 	}
 }
-// Driver function 
+
 int main() 
 { 
-	
+	sem_init(&sem, 0, 1);
+	end_of_game = 0;
 	
 	int sockfd, connfd, connfd2, len; 
 	struct sockaddr_in servaddr, cli; 
  
-	// socket create and verification 
+
 	sockfd = socket(AF_INET, SOCK_STREAM, 0); 
 	if (sockfd == -1) { 
 		printf("socket creation failed...\n"); 
@@ -198,19 +250,18 @@ int main()
 		printf("Socket successfully created..\n"); 
 
 	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0)
-    	error("setsockopt(SO_REUSEADDR) failed");
+    	herror("setsockopt(SO_REUSEADDR) failed");
 	
 	
 	bzero(&servaddr, sizeof(servaddr)); 
 
 
  
-	// assign IP, PORT 
+
 	servaddr.sin_family = AF_INET; 
 	servaddr.sin_addr.s_addr = htonl(INADDR_ANY); 
 	servaddr.sin_port = htons(PORT); 
- 
-	// Binding newly created socket to given IP and verification 
+
 	if ((bind(sockfd, (SA*)&servaddr, sizeof(servaddr))) != 0) { 
 		printf("socket bind failed...\n"); 
 		printf("Error code: %d\n", errno);
@@ -219,7 +270,7 @@ int main()
 	else 
 		printf("Socket successfully binded..\n"); 
  
-	// Now server is ready to listen and verification 
+
 	if ((listen(sockfd, 5)) != 0) { 
 		printf("Listen failed...\n"); 
 		exit(0); 
@@ -228,7 +279,7 @@ int main()
 		printf("Server listening..\n"); 
 	len = sizeof(cli); 
  
-	// Accept the data packet from client and verification 
+
 	connfd = accept(sockfd, (SA*)&cli, &len); 
 	if (connfd < 0) { 
 		printf("server accept failed...\n"); 
@@ -245,7 +296,7 @@ int main()
 	else 
 		printf("server accept the client number 2...\n"); 
  
-	// Function for chatting between client and server 
+
 	
 	pthread_t w;
 	pthread_t w2;
@@ -262,9 +313,6 @@ int main()
 	pthread_join (w2 , NULL ) ;
 	pthread_join (server_th, NULL ) ;	
 	
-	//printf (" Hello world \ n ") ;
-	//func(connfd); 
- 
-	// After chatting close the socket 
+
 	close(sockfd); 
 } 
